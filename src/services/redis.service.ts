@@ -15,6 +15,10 @@ export class RedisService {
         return JSON.parse(result);
     }
 
+    async del(key: string): Promise<any> {
+        return this.redisClient.del(key);
+    }
+
     async sadd(key: string, members: string[]): Promise<number> {
         return this.redisClient.sadd(key, ...members);
     }
@@ -29,5 +33,18 @@ export class RedisService {
     
     async sunion(...keys: string[]): Promise<string[]> {
         return this.redisClient.sunion(...keys);
+    }
+
+    async exists(key: string): Promise<boolean> {
+        const result = await this.redisClient.exists(key);
+        return result === 1;
+    }
+
+    async rpush(key: string, values: string[]): Promise<number> {
+        return this.redisClient.rpush(key, ...values);
+    }
+
+    async lrange(key: string, start: number, stop: number): Promise<string[]> {
+        return this.redisClient.lrange(key, start, stop);
     }
 }

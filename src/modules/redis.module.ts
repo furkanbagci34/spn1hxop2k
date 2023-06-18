@@ -1,16 +1,12 @@
 import { Module } from '@nestjs/common';
 import { Redis } from 'ioredis';
-
+import { redis } from '../objects/Config'
 @Module({
   providers: [
     {
       provide: 'REDIS',
       useFactory: (): Redis => {
-        return new Redis({
-          host: 'localhost',
-          port: 6379,
-          db: 0,
-        });
+        return new Redis(redis.connectionString);
       },
     },
   ],

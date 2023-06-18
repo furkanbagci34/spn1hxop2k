@@ -6,9 +6,11 @@ import { ChatModule } from './modules/chat.module';
 import  LoginModule from './modules/login.module';
 import { RedisModule } from './modules/redis.module';
 import { RedisService } from './services/redis.service';
+import { mongoDb } from './objects/Config'
+
 @Module({
     imports: [
-        MongooseModule.forRoot("mongodb://127.0.0.1:27017/nestjs-socket"),
+        MongooseModule.forRoot(mongoDb.connectionString),
         RedisModule,
         ChatModule,LoginModule,
 

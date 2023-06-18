@@ -1,7 +1,7 @@
 import { verify, sign } from 'jsonwebtoken';
 
 export interface TokenValidator {
-    isValidToken(token: string): Promise<boolean>;
+    isValidToken(token: string): Promise<any>;
     generateToken(username: string): string;
 }
 
