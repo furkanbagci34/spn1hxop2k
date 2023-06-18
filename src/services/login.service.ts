@@ -56,15 +56,22 @@ export default class LoginService {
     async addFriend(username: string, friendUsername: string) {
 
         return new Promise((resolve) => {
-
-            const addedFriend = new this.userFriendModel({username,friendUsername});
-
-            addedFriend.save().then(() => 
-            {
-                resolve(new SuccessResult())
-            }).catch( (e) => {
-                resolve(new ErrorResult(e.message));
-            });
-        })
+            const addedFriend = new this.userFriendModel({ username, friendUsername });
+            const addedFriendReverse = new this.userFriendModel({ username: friendUsername, friendUsername: username });
+        
+            addedFriend.save()
+                .then(() => {
+                    addedFriendReverse.save()
+                        .then(() => {
+                            resolve(new SuccessResult());
+                        })
+                        .catch((e) => {
+                            resolve(new ErrorResult(e.message));
+                        });
+                })
+                .catch((e) => {
+                    resolve(new ErrorResult(e.message));
+                });
+        });
     }
 }

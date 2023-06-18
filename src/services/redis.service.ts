@@ -20,6 +20,13 @@ export class RedisService {
     }
 
     async sadd(key: string, members: string[]): Promise<number> {
+
+        const isKeyExists = await this.redisClient.exists(key);
+
+        if (isKeyExists) {
+            await this.redisClient.del(key);
+        }
+
         return this.redisClient.sadd(key, ...members);
     }
 

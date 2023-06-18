@@ -38,17 +38,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         this.sendOnlineMessage(tokenResult.username)
 
-        const pendingMessages = await this.getPendingMessages(tokenResult.username);
-
-        if(pendingMessages.length === 0) {
-            return
-        }
-
-        for (const message of pendingMessages) {
-            this.server.to(socket.id).emit('chat', message);
-        }
-
-        await this.clearPendingMessages(tokenResult.username);
+        this.sendPendingMessage(tokenResult.username,socket)
     }
 
     async handleDisconnect(socket: Socket) {
@@ -59,13 +49,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     async addConnectedUser(username: string, socket: Socket) {
-        // await this.redisService.set(`onlineUsers:${socket.id}`, 'online');
         await this.redisService.sadd(`userName:${username}`, [socket.id]);
         await this.redisService.sadd(`userSockets:${socket.id}`, [username]);
     }
 
     async removeConnectedUser(username: string, socket: Socket) {
-        // await this.redisService.del(`onlineUsers:${socket.id}`);
         await this.redisService.srem(`userName:${username}`, [socket.id]);
         await this.redisService.srem(`userSockets:${socket.id}`, [username]);
     }
@@ -147,6 +135,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     async clearPendingMessages(userName: string) {
         await this.redisService.del(`messageQueue:${userName}`);
+    }
+
+    async sendPendingMessage(userName:string, socket: Socket) {
+
+        const pendingMessages = await this.getPendingMessages(userName);
+
+        if(pendingMessages.length === 0) {
+            return
+        }
+
+        for (const message of pendingMessages) {
+            this.server.to(socket.id).emit('chat', message);
+        }
+
+        await this.clearPendingMessages(userName);
     }
 
     @SubscribeMessage('chat')
