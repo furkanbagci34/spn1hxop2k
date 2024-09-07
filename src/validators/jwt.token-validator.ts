@@ -1,37 +1,33 @@
-import { verify, sign } from 'jsonwebtoken';
+import {verify, sign} from "jsonwebtoken";
 
 export interface TokenValidator {
-    isValidToken(token: string): Promise<any>;
-    generateToken(username: string): string;
+	isValidToken(token: string): Promise<any>;
+	generateToken(email: string): string;
 }
 
 export class JwtTokenValidator implements TokenValidator {
+	public generateToken(email: string): string {
+		const secretKey = process.env.JWT_KEY;
+		const token = sign({email}, secretKey, {expiresIn: "1w"});
 
-    public generateToken(username: string): string {
+		return token;
+	}
 
-        const secretKey = process.env.JWT_KEY;
-        const token = sign({ username }, secretKey, { expiresIn: '1w' });
+	public async isValidToken(token: string): Promise<any> {
+		if (!token) {
+			return false;
+		}
 
-        return token;
-    }
+		try {
+			const decodedToken = verify(token, process.env.JWT_KEY);
 
-    public async isValidToken(token: string): Promise<any> {
+			if (!decodedToken) {
+				return false;
+			}
 
-        if (!token) {
-            return false;
-        }
-
-        try {
-            const decodedToken = verify(token, process.env.JWT_KEY);
-
-            if (!decodedToken) {
-                return false;
-            }
-
-            return decodedToken;
-
-        } catch (error) {
-            return false;
-        }
-    }
+			return decodedToken;
+		} catch (error) {
+			return false;
+		}
+	}
 }

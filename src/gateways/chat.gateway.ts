@@ -1,9 +1,9 @@
 import {
-    WebSocketGateway,
-    SubscribeMessage,
-    WebSocketServer,
-    OnGatewayConnection,
-    OnGatewayDisconnect,
+  WebSocketGateway,
+  SubscribeMessage,
+  WebSocketServer,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtTokenValidator } from '../validators/jwt.token-validator';
@@ -14,161 +14,179 @@ import { InjectModel } from '@nestjs/mongoose';
 
 @WebSocketGateway()
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer()
+  server: Server;
 
-    @WebSocketServer()
-    server: Server;
+  constructor(
+    private readonly redisService: RedisService,
+    @InjectModel('UserFriend')
+    private readonly userFriendModel: Model<UserFriendDocument>,
+  ) {}
 
-    constructor(private readonly redisService: RedisService,
-        @InjectModel('UserFriend') private readonly userFriendModel: Model<UserFriendDocument>) {}
+  tokenValidator = new JwtTokenValidator();
 
-    tokenValidator = new JwtTokenValidator();
+  async handleConnection(socket: Socket) {
+    const token = socket.handshake.headers.token as string;
 
-    async handleConnection(socket: Socket) {
+    const tokenResult = await this.tokenValidator.isValidToken(token);
 
-        const token = socket.handshake.headers.token as string;
-
-        const tokenResult = await this.tokenValidator.isValidToken(token)
-
-        if (!tokenResult) {
-            socket.disconnect();
-            return
-        } 
-
-        this.addConnectedUser(tokenResult.username,socket)
-
-        this.sendOnlineMessage(tokenResult.username)
-
-        this.sendPendingMessage(tokenResult.username,socket)
+    if (!tokenResult) {
+      socket.disconnect();
+      return;
     }
 
-    async handleDisconnect(socket: Socket) {
-        const username = await this.getUserName(socket.id)
+    this.addConnectedUser(tokenResult.username, socket);
 
-        this.sendOfflineMessage(username)
-        this.removeConnectedUser(username,socket)
+    this.sendOnlineMessage(tokenResult.username);
+
+    this.sendPendingMessage(tokenResult.username, socket);
+  }
+
+  async handleDisconnect(socket: Socket) {
+    const username = await this.getUserName(socket.id);
+
+    this.sendOfflineMessage(username);
+    this.removeConnectedUser(username, socket);
+  }
+
+  async addConnectedUser(username: string, socket: Socket) {
+    await this.redisService.sadd(`userName:${username}`, [socket.id]);
+    await this.redisService.sadd(`userSockets:${socket.id}`, [username]);
+  }
+
+  async removeConnectedUser(username: string, socket: Socket) {
+    await this.redisService.srem(`userName:${username}`, [socket.id]);
+    await this.redisService.srem(`userSockets:${socket.id}`, [username]);
+  }
+
+  async getUserFriendListSocket(username: string) {
+    const userFriends = await this.userFriendModel
+      .find({ username: username })
+      .exec();
+
+    if (userFriends.length === 0) {
+      return [];
     }
 
-    async addConnectedUser(username: string, socket: Socket) {
-        await this.redisService.sadd(`userName:${username}`, [socket.id]);
-        await this.redisService.sadd(`userSockets:${socket.id}`, [username]);
+    const userFriendList = userFriends.map(
+      (userFriend) => userFriend.friendUsername,
+    );
+
+    await this.redisService.sadd(`friends:${username}`, userFriendList);
+
+    const socketKeys = userFriendList.map((friend) => `userName:${friend}`);
+
+    if (socketKeys.length === 0) {
+      return [];
     }
 
-    async removeConnectedUser(username: string, socket: Socket) {
-        await this.redisService.srem(`userName:${username}`, [socket.id]);
-        await this.redisService.srem(`userSockets:${socket.id}`, [username]);
+    const userFriendListSocket = await this.redisService.sunion(...socketKeys);
+
+    return userFriendListSocket;
+  }
+
+  async getUserFriendListUserName(username: string) {
+    const userFriends = await this.userFriendModel
+      .find({ username: username })
+      .exec();
+
+    if (userFriends.length === 0) {
+      return [];
     }
 
-    async getUserFriendListSocket(username: string) {
-        const userFriends = await this.userFriendModel.find({ username: username }).exec();
+    const userFriendListUserName = userFriends.map(
+      (userFriend) => userFriend.friendUsername,
+    );
 
-        if(userFriends.length === 0) {
-            return []
-        }
+    return userFriendListUserName;
+  }
 
-        const userFriendList = userFriends.map(userFriend => userFriend.friendUsername)
+  async sendOnlineMessage(username: string) {
+    const friendSockets = await this.getUserFriendListSocket(username);
 
-        await this.redisService.sadd(`friends:${username}`, userFriendList );
-
-        const socketKeys = userFriendList.map((friend) => `userName:${friend}`);
-
-        if(socketKeys.length === 0) {
-            return []
-        }
-
-        const userFriendListSocket = await this.redisService.sunion(...socketKeys);
-
-        return userFriendListSocket
+    if (friendSockets.length === 0) {
+      return;
     }
 
-    async getUserFriendListUserName(username: string) {
-        const userFriends = await this.userFriendModel.find({ username: username }).exec();
+    await Promise.all(
+      friendSockets.map((socketId) =>
+        this.server.to(socketId).emit('chat', `${username} is online`),
+      ),
+    );
+  }
 
-        if(userFriends.length === 0) {
-            return []
-        }
+  async sendOfflineMessage(username: string) {
+    const friendSockets = await this.getUserFriendListSocket(username);
 
-        const userFriendListUserName = userFriends.map(userFriend => userFriend.friendUsername)
-
-        return userFriendListUserName
+    if (friendSockets.length === 0) {
+      return;
     }
 
-    async sendOnlineMessage(username: string) {
+    await Promise.all(
+      friendSockets.map((socketId) =>
+        this.server.to(socketId).emit('chat', `${username} is offline`),
+      ),
+    );
+  }
 
-        const friendSockets = await this.getUserFriendListSocket(username)
+  async isOnline(userName: string): Promise<boolean> {
+    return await this.redisService.exists(`userName:${userName}`);
+  }
 
-        if(friendSockets.length === 0) {
-            return
-        }
+  async getUserName(socket: string) {
+    const username = await this.redisService.smembers(`userSockets:${socket}`);
 
-        await Promise.all(friendSockets.map((socketId) => this.server.to(socketId).emit('chat', `${username} is online`)));
+    return username[0];
+  }
+
+  async enqueueMessage(userName: string, message: string) {
+    await this.redisService.rpush(`messageQueue:${userName}`, [message]);
+  }
+
+  async getPendingMessages(userName: string) {
+    const messages = await this.redisService.lrange(
+      `messageQueue:${userName}`,
+      0,
+      -1,
+    );
+    return messages;
+  }
+
+  async clearPendingMessages(userName: string) {
+    await this.redisService.del(`messageQueue:${userName}`);
+  }
+
+  async sendPendingMessage(userName: string, socket: Socket) {
+    const pendingMessages = await this.getPendingMessages(userName);
+
+    if (pendingMessages.length === 0) {
+      return;
     }
 
-    async sendOfflineMessage(username: string) {
-
-        const friendSockets = await this.getUserFriendListSocket(username)
-
-        if(friendSockets.length === 0) {
-            return
-        }
-
-        await Promise.all(friendSockets.map((socketId) => this.server.to(socketId).emit('chat', `${username} is offline`)));
+    for (const message of pendingMessages) {
+      this.server.to(socket.id).emit('chat', message);
     }
 
-    async isOnline(userName: string): Promise<boolean> {
-        return await this.redisService.exists(`userName:${userName}`);
+    await this.clearPendingMessages(userName);
+  }
+
+  @SubscribeMessage('chat')
+  async handleMessage(socket: Socket, message: string) {
+    const username = await this.getUserName(socket.id);
+    const friendsUser = await this.getUserFriendListUserName(username);
+
+    for (const userNameToMessage of friendsUser) {
+      const isOnline = await this.isOnline(userNameToMessage);
+
+      if (isOnline) {
+        const socketId = await this.redisService.smembers(
+          `userName:${userNameToMessage}`,
+        );
+
+        this.server.to(socketId).emit('chat', `${username}: ${message}`);
+      } else {
+        await this.enqueueMessage(userNameToMessage, `${username}: ${message}`);
+      }
     }
-
-    async getUserName(socket: string) {
-        const username = await this.redisService.smembers(`userSockets:${socket}`)
-
-        return username[0]
-    }
-
-    async enqueueMessage(userName: string, message: string) {
-        await this.redisService.rpush(`messageQueue:${userName}`, [message]);
-    }
-
-    async getPendingMessages(userName: string) {
-        const messages = await this.redisService.lrange(`messageQueue:${userName}`, 0, -1);
-        return messages;
-    }
-
-    async clearPendingMessages(userName: string) {
-        await this.redisService.del(`messageQueue:${userName}`);
-    }
-
-    async sendPendingMessage(userName:string, socket: Socket) {
-
-        const pendingMessages = await this.getPendingMessages(userName);
-
-        if(pendingMessages.length === 0) {
-            return
-        }
-
-        for (const message of pendingMessages) {
-            this.server.to(socket.id).emit('chat', message);
-        }
-
-        await this.clearPendingMessages(userName);
-    }
-
-    @SubscribeMessage('chat')
-    async handleMessage(socket: Socket, message: string) {
-        const username = await this.getUserName(socket.id)
-        const friendsUser = await this.getUserFriendListUserName(username)
-
-        for (const userNameToMessage of friendsUser) {
-
-            const isOnline = await this.isOnline(userNameToMessage);
-
-            if (isOnline) {
-                const socketId = await this.redisService.smembers(`userName:${userNameToMessage}`);
-
-                this.server.to(socketId).emit('chat', `${username}: ${message}`);
-            } 
-            else {
-                await this.enqueueMessage(userNameToMessage, `${username}: ${message}`);
-            }
-        }
-    }
+  }
 }
